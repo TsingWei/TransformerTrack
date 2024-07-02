@@ -349,6 +349,107 @@ class Tracker:
             tracked_bb = np.array(output_boxes).astype(int)
             bbox_file = '{}.txt'.format(base_results_path)
             np.savetxt(bbox_file, tracked_bb, delimiter='\t', fmt='%d')
+    def test_fps(self, debug=None, visdom_info=None, videofilepath=None, optional_box=None, save_results=False):
+        """Run the tracker with the webcam or a provided video file.
+        args:
+            debug: Debug level.
+        """
+        fourcc = cv.VideoWriter_fourcc(*'DIVX')
+
+        params = self.get_parameters()
+
+        debug_ = debug
+        if debug is None:
+            debug_ = getattr(params, 'debug', 0)
+        params.debug = debug_
+
+        params.tracker_name = self.name
+        params.param_name = self.parameter_name
+
+        self._init_visdom(visdom_info, debug_)
+
+        # multiobj_mode = getattr(params, 'multiobj_mode', getattr(self.tracker_class, 'multiobj_mode', 'default'))
+        multiobj_mode = 'default'
+        if multiobj_mode == 'default':
+            tracker = self.create_tracker(params)
+            if hasattr(tracker, 'initialize_features'):
+                tracker.initialize_features()
+
+        frame_number = 0
+
+        if videofilepath is not None:
+            assert os.path.isfile(videofilepath), "Invalid param {}".format(videofilepath)
+            ", videofilepath must be a valid videofile"
+            cap = cv.VideoCapture(videofilepath)
+            ret, frame = cap.read()
+            frame_number += 1
+            #cv.imshow(display_name, frame)
+            
+        resolution=frame.shape
+        print(resolution)
+
+        wframe=resolution[0]
+        hframe=resolution[1]
+        print(wframe)
+        print(hframe)
+        imgname2=videofilepath.split('/')[-1]
+
+        # videoWriter = cv.VideoWriter('output'+imgname2.split('.')[0]+'.mp4', fourcc, 20.0, (hframe,wframe))
+
+
+        next_object_id = 1
+        sequence_object_ids = []
+        prev_output = OrderedDict()
+        output_boxes = OrderedDict()
+
+        if optional_box is not None:
+            assert isinstance(optional_box, (list, tuple))
+            assert len(optional_box) == 4, "valid box's format is [x,y,w,h]"
+
+            out = tracker.initialize(frame, {'init_bbox':optional_box,
+                                       'init_object_ids': [next_object_id, ],
+                                       'object_ids': [next_object_id, ],
+                                       'sequence_object_ids': [next_object_id, ]})
+
+            prev_output = OrderedDict(out)
+
+            output_boxes[next_object_id] = [optional_box, ]
+            sequence_object_ids.append(next_object_id)
+            next_object_id += 1
+
+        # Wait for initial bounding box if video!
+        paused = videofilepath is not None
+        paused=False
+        t_s = time.time()
+        while True:
+            if not paused:
+                # Capture frame-by-frame
+                ret, frame = cap.read()
+                frame_number += 1
+                if frame is None:
+                    break
+            info = OrderedDict()
+            info['previous_output'] = prev_output
+
+
+            # Draw box
+
+            if len(sequence_object_ids) > 0:
+                info['sequence_object_ids'] = sequence_object_ids
+                out = tracker.track(frame, info)
+                prev_output = OrderedDict(out)
+
+            # videoWriter.write(frame_disp)
+            # print(f"Frame: {frame_number}")
+
+        torch.cuda.synchronize()
+        t_e = time.time()
+        print('speed: %.2f FPS' % (frame_number / (t_e - t_s)))
+
+        # When everything done, release the capture
+        cap.release()
+        # cv.destroyAllWindows()
+        # videoWriter.release()
 
     def run_webcam(self, debug=None, visdom_info=None):
         """Run the tracker with the webcam.
